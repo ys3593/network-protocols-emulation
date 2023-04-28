@@ -5,9 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="712f67cb-0107-4764-a5e6-92da710148b6" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/cnnode.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/dvnode.py" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/gbnnode.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/oldcnncode.py" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
