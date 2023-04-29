@@ -21,7 +21,6 @@ class CNNNode:
         # attributes - from gbn
         # window: key - port, value - list of int (seq)
         self.window = dict()
-        self.timer = time.time()
         # the packet current node need to receive
         self.rcv_base = 0
         self.timer = time.time()
@@ -29,11 +28,12 @@ class CNNNode:
         # attributes - new
         # send_to: key - port, value - [no_rcv_ack, no_sent_pkt]
         # send_from: key - port, value - loss_rate
-        self.send_to = dict()
+        self.send_from_stat = dict()
+        self.send_from_link = dict()
         self.send_from = dict()
+        self.send_to = []
         self.print_loss_timer = time.time()
         self.update_loss_timer = time.time()
-        self.change = False
         self.seq_no = 0
 
         # open socket & bind the socket with port
@@ -50,17 +50,19 @@ class CNNNode:
         self.hop[neighbor] = None
         self.neighbors.add(neighbor)
         self.send_from[neighbor] = loss_rate
+        self.send_from_stat[neighbor] = [0, 0]
+        self.send_from_link[neighbor] = 0
 
     def add_send_to(self, neighbor):
         """ add neighbor after send"""
         self.dv[neighbor] = float(0)
         self.hop[neighbor] = None
         self.neighbors.add(neighbor)
-        self.send_to[neighbor] = [0, 0]
+        self.send_to.append(neighbor)
         self.window[neighbor] = []
 
     def listen(self):
-        """ listen incoming dv: update dv and hop, send the updated to neighbors, send probe packets """
+        """ listen incoming messages and start new thread to process received messages """
         while True:
             buf, sender_address = self.socket.recvfrom(4096)
             ip, sender_port = sender_address
@@ -78,15 +80,22 @@ class CNNNode:
         if header == 'dv':
             new_dv = json.loads(lines[1])
             print(f"[{time.time()}] Message received at Node {self.self_port} from Node {sender_port}")
-            print(f"the receive dv is {new_dv}")
+            # print(f"the receive dv is {new_dv}")
 
             # update dv and hop
             update = False
             n_dis = self.dv[sender_port]
             # print(f"the old dv in Node {self.self_port} is {self.dv}")
             # print(f"the old hop in Node {self.self_port} is {self.hop}")
-            if sender_port in self.send_from:
-                self.dv[sender_port] = new_dv[str(self.self_port)]
+
+            # get the actual link cost
+            link_cost = float(lines[3])
+            if link_cost != -1:
+                if self.hop[sender_port] is None:
+                    self.dv[sender_port] = link_cost
+                elif link_cost < self.dv[sender_port]:
+                    self.dv[sender_port] = link_cost
+                    self.hop[sender_port] = None
 
             for n in new_dv:
                 if n != self.self_port:
@@ -94,6 +103,11 @@ class CNNNode:
                     if int_n in self.dv:
                         new_dis = float("{:.2f}".format(Decimal(str(new_dv[n])) + Decimal(str(n_dis))))
                         # new_dis = new_dv[n] + n_dis
+                        if int_n != self.self_port:
+                            if self.hop[int_n] == sender_port and self.dv[int_n] != new_dis:
+                                update = True
+                                self.dv[int_n] = new_dis
+
                         if self.dv[int_n] > new_dis and new_dis != float(0) and new_dv[n] != float(0) and n_dis != float(0):
                             update = True
                             self.dv[int_n] = new_dis
@@ -104,7 +118,6 @@ class CNNNode:
                             # self.dv[int_n] = new_dv[n] + n_dis
                             self.dv[int_n] = float("{:.2f}".format(Decimal(str(new_dv[n])) + Decimal(str(n_dis))))
                             self.hop[int_n] = sender_port
-
 
             # print the routing table every time after a message is received
             # print(f"the new dv in Node {self.self_port} is {self.dv}")
@@ -130,9 +143,13 @@ class CNNNode:
                 send_dv_thread.start()
 
         elif header == 'probe':
-            if random.random() < self.send_from[sender_port]:
-                pass
-            else:
+            # no_sent_pkt increase by 1
+            self.send_from_stat[sender_port][1] += 1
+
+            if random.random() > self.send_from[sender_port]:
+                # no_rcv_pkt increase by 1
+                self.send_from_stat[sender_port][0] += 1
+
                 # send ack
                 if int(lines[1]) == self.rcv_base:
                     self.rcv_base += 1
@@ -143,10 +160,36 @@ class CNNNode:
                     to_send = "ack" + "\n" + str(ack_s)
                     self.socket.sendto(to_send.encode(), ('', sender_port))
 
-        elif header == 'ack':
-            # no_rcv_ack increase by 1
-            self.send_to[sender_port][0] += 1
+            change = False
+            if time.time() - self.print_loss_timer > 1:
+                no_rcv_pkt = self.send_from_stat[sender_port][0]
+                no_sent_pkt = self.send_from_stat[sender_port][1]
+                no_drop_pack = no_sent_pkt - no_rcv_pkt
+                if no_sent_pkt != 0:
+                    new_loss_rate = float("{:.2f}".format(no_drop_pack / no_sent_pkt))
 
+                    if self.send_from_link[sender_port] != new_loss_rate:
+                        self.send_from_link[sender_port] = new_loss_rate
+                        change = True
+
+                    print(
+                        f"[{time.time()}] Link to {sender_port}: {no_sent_pkt} packets sent, {no_drop_pack} packets lost, loss rate {new_loss_rate}")
+                    self.print_loss_timer = time.time()
+
+            # update dv
+            if self.hop[sender_port] is None:
+                self.dv[sender_port] = self.send_from_link[sender_port]
+            elif self.send_from_link[sender_port] < self.dv[sender_port]:
+                self.dv[sender_port] = self.send_from_link[sender_port]
+                self.hop[sender_port] = None
+
+            if time.time() - self.update_loss_timer > 5:
+                self.update_loss_timer = time.time()
+                # send out new dv every 5 seconds if there is a change
+                if change:
+                    self.send_dv()
+
+        elif header == 'ack':
             # process window
             self.timer = time.time()
             for p in range(len(self.window[sender_port])):
@@ -154,26 +197,6 @@ class CNNNode:
                 if w == int(lines[1]):
                     self.window[sender_port] = self.window[sender_port][p + 1:]
                     break
-
-            if time.time() - self.print_loss_timer > 1:
-                no_rcv_ack = self.send_to[sender_port][0]
-                no_sent_pkt = self.send_to[sender_port][1]
-                no_drop_pack = no_sent_pkt - no_rcv_ack
-                if no_sent_pkt != 0:
-                    new_loss_rate = float("{:.2f}".format(no_drop_pack / no_sent_pkt))
-
-                    if self.dv[sender_port] != new_loss_rate and self.hop[sender_port] is None:
-                        self.dv[sender_port] = new_loss_rate
-                        self.change = True
-                    print(
-                        f"[{time.time()}] Link to {sender_port}: {no_sent_pkt} packets sent, {no_drop_pack} packets lost, loss rate {new_loss_rate}")
-                    self.print_loss_timer = time.time()
-
-            if time.time() - self.update_loss_timer > 5:
-                self.update_loss_timer = time.time()
-                if self.change:
-                    self.change = False
-                    self.send_dv()
 
     def print(self):
         """ print the routing table from dv and hop"""
@@ -190,10 +213,14 @@ class CNNNode:
                     print(f"- ({dis}) -> Node {n}")
 
     def send_dv(self):
-        """ send dv to neighbors"""
+        """ send dv to neighbors, along with actual link cost"""
         for n in self.neighbors:
+            link_cost = -1
+            if n in self.send_from_link:
+                link_cost = self.send_from_link[n]
+
             timestamp = time.time()
-            to_send = "dv" + "\n" + json.dumps(self.dv) + "\n" + str(timestamp)
+            to_send = "dv" + "\n" + json.dumps(self.dv) + "\n" + str(timestamp) + "\n" + str(link_cost)
             self.socket.sendto(to_send.encode(), ('', n))
             print(f"[{time.time()}] Message sent from Node {self.self_port} to Node {n}")
 
@@ -214,7 +241,6 @@ class CNNNode:
 
                 to_send = "probe" + "\n" + str(self.seq_no)
                 self.socket.sendto(to_send.encode(), ('', peer_port))
-                self.send_to[peer_port][1] += 1
                 # print(f"probe packet{self.seq_no} sent to {peer_port}")
                 self.seq_no += 1
 
@@ -228,7 +254,6 @@ class CNNNode:
                 for w in self.window[peer_port]:
                     seq = w
                     to_send = "probe" + "\n" + str(seq)
-                    self.send_to[peer_port][1] += 1
                     self.socket.sendto(to_send.encode(), ('', peer_port))
                     # print(f"[{time.time()}] packet{seq} {char} sent")
 

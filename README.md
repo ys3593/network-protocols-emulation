@@ -121,8 +121,8 @@ The class uses the Bellman-Ford algorithm to build and update the routing tables
 And the UDP protocol is used to exchange the routing table information among the nodes in the network.
 -  Attributes
     - self.self_port: the port number of the current node
-    - self.dv: a diction whose key is the neighbor port and value is the distance from the current node to the neighbor node. self.dv[self_port] is set to 0.
-    - self.hop: a diction whose key is the neighbor port and value is port number of the next hop for each destination
+    - self.dv: a dictionary whose key is the neighbor port and value is the distance from the current node to the neighbor node. self.dv[self_port] is set to 0.
+    - self.hop: a dictionary whose key is the neighbor port and value is port number of the next hop for each destination
     - self.neighbors: a list of neighbor ports 
     - self.first: a boolean initialized as True. It is used to track whether this node send out self.dv at least once so this attribute would turn to False if this node has already sent out its self.dv to neighbors.
 
@@ -143,10 +143,31 @@ The CNNNode class implements both GBN and DV protocols. The GBN protocol creates
 and the DV algorithm determines the shortest paths over these GBN links. 
 The distance of each link in this class is the packet loss rate on that link calculated by the GBN protocol.
 -  Attributes
-    - ##
+    - self.self_port: the port number of the current node
+    - self.dv: a dictionary whose key is the neighbor port and value is the distance from the current node to the neighbor node. self.dv[self_port] is set to 0.
+    - self.hop: a dictionary whose key is the neighbor port and value is port number of the next hop for each destination
+    - self.neighbors: a set of neighbor ports 
+    - self.first: a boolean initialized as True. It is used to track whether this node send out self.dv at least once so this attribute would turn to False if this node has already sent out its self.dv to neighbors.
+    - self.window: a list of tuples (seq, char)
+    - self.timer: the timer for timeout in the GBN protocol
+    - self.rcv_base: the sequence number of the packet that the node need to receive currently 
+    - self.send_to: a list of neighbor ports after send
+    - self.send_from: a dictionary whose key is the neighbor port and value is the loss rate
+    - self.send_from_link: a dictionary whose key is the neighbor port and value is the link cost
+    - self.send_from_stat: a dictionary whose key is the neighbor port and value is the list with no_rcv_pkt and no_total_pkt
+    - self.print_loss_timer: the timer for displaying the packet loss rate for each link every 1 second
+    - self.update_loss_timer: the timer for sending out updates of distance vectors for each link every 5 second
+    - self.seq_no: the sequence number for the probes. It increases as the probes sending out.
 
 - Methods
-    - ##
+    - add_send_from(self, neighbor, loss_rate): add neighbor after receive.
+      The argument neighbor is the neighbor port and loss_rate is the rate to drop the packets received from the neighbor node.
+    - add_send_to(self, neighbor): add neighbor after send. The argument neighbor is the neighbor port.
+    - listen(self): listen incoming messages and start new thread to process received messages
+    - process_listen(self, header, lines, sender_port): process the messages recieved by listen method and deal with headers, including "dv", "probe" and "ack"
+    - print(self): print the routing table from self.dv and self.hop
+    - send_dv(self): send self.dv to neighbors
+    - send_probe(self, peer_port): send probes with a window size as 5 to the peer_port. The argument peer_port is the peer port number. 
   
 - Threads
   - listen thread: thread to listen incoming messages
